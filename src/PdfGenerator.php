@@ -34,7 +34,6 @@ class PdfGenerator
         if ($useBangla && $fontPath && is_file($fontPath)) {
             $options->set('defaultFont', $fontFamily);
             $html = $this->injectBanglaFontCss($html, $fontPath, $fontFamily);
-            $options->setFontDir([dirname($fontPath)]);
         } else {
             $options->set('defaultFont', $this->config['default_font'] ?? 'DejaVu Sans');
         }
@@ -51,14 +50,16 @@ class PdfGenerator
 
     /**
      * Inject @font-face for Bangla so Bengali text renders in PDF.
+     * Use base64 data URI so Dompdf loads the font without path resolution issues.
      */
     protected function injectBanglaFontCss(string $html, string $fontPath, string $fontFamily): string
     {
-        $absoluteUrl = 'file:///' . str_replace(['\\', ' '], ['/', '%20'], realpath($fontPath));
+        $fontData = base64_encode(file_get_contents($fontPath));
+        $dataUri = 'data:font/ttf;base64,' . $fontData;
         $css = sprintf(
-            '<style>@font-face{font-family:"%s";src:url("%s");}body,body *{font-family:"%s",DejaVu Sans,sans-serif !important;}</style>',
+            '<style>@font-face{font-family:"%s";src:url("%s") format("truetype");}body,body *{font-family:"%s",DejaVu Sans,sans-serif !important;}</style>',
             $fontFamily,
-            $absoluteUrl,
+            $dataUri,
             $fontFamily
         );
         if (stripos($html, '<head>') !== false) {
