@@ -24,6 +24,10 @@ class PdfGeneratorServiceProvider extends ServiceProvider
             $this->publishes([
                 __DIR__ . '/../config/pdf-generator.php' => config_path('pdf-generator.php'),
             ], 'pdf-generator-config');
+
+            $this->commands([
+                Commands\InstallBanglaFontCommand::class,
+            ]);
         }
     }
 }

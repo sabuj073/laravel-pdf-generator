@@ -21,13 +21,26 @@ class PdfGenerator
     /**
      * Load HTML string and return Dompdf instance (call ->stream(), ->output() or get raw).
      */
-    public function loadHtml(string $html): Dompdf
+    public function loadHtml(string $html, bool $useBanglaFont = null): Dompdf
     {
         $options = new Options();
         $options->set('isRemoteEnabled', true);
-        $options->set('defaultFont', $this->config['default_font'] ?? 'DejaVu Sans');
+
+        $bangla = $this->config['bangla_font'] ?? [];
+        $useBangla = $useBanglaFont ?? ($bangla['enabled'] ?? false);
+        $fontPath = $bangla['path'] ?? $this->resolveBanglaFontPath();
+        $fontFamily = $bangla['family'] ?? 'Noto Sans Bengali';
+
+        if ($useBangla && $fontPath && is_file($fontPath)) {
+            $options->set('defaultFont', $fontFamily);
+            $html = $this->injectBanglaFontCss($html, $fontPath, $fontFamily);
+            $options->setFontDir([dirname($fontPath)]);
+        } else {
+            $options->set('defaultFont', $this->config['default_font'] ?? 'DejaVu Sans');
+        }
+
         $dompdf = new Dompdf($options);
-        $dompdf->loadHtml($html);
+        $dompdf->loadHtml($html, 'UTF-8');
         $dompdf->setPaper(
             $this->config['paper'] ?? 'A4',
             $this->config['orientation'] ?? 'portrait'
@@ -37,36 +50,71 @@ class PdfGenerator
     }
 
     /**
-     * Load Blade view with data and return Dompdf instance.
+     * Inject @font-face for Bangla so Bengali text renders in PDF.
      */
-    public function loadView(string $viewName, array $data = []): Dompdf
+    protected function injectBanglaFontCss(string $html, string $fontPath, string $fontFamily): string
+    {
+        $absoluteUrl = 'file:///' . str_replace(['\\', ' '], ['/', '%20'], realpath($fontPath));
+        $css = sprintf(
+            '<style>@font-face{font-family:"%s";src:url("%s");}body,body *{font-family:"%s",DejaVu Sans,sans-serif !important;}</style>',
+            $fontFamily,
+            $absoluteUrl,
+            $fontFamily
+        );
+        if (stripos($html, '<head>') !== false) {
+            return preg_replace('/<head\s*>/i', '<head><meta charset="UTF-8">' . $css, $html, 1);
+        }
+        if (stripos($html, '<html') !== false) {
+            return preg_replace('/(<html[^>]*>)/i', '$1<head><meta charset="UTF-8">' . $css . '</head>', $html, 1);
+        }
+        return '<!DOCTYPE html><html><head><meta charset="UTF-8">' . $css . '</head><body>' . $html . '</body></html>';
+    }
+
+    protected function resolveBanglaFontPath(): ?string
+    {
+        $packageFont = __DIR__ . '/../resources/fonts/NotoSansBengali-Regular.ttf';
+        if (is_file($packageFont)) {
+            return $packageFont;
+        }
+        $storageFont = storage_path('fonts/NotoSansBengali-Regular.ttf');
+        return is_file($storageFont) ? $storageFont : null;
+    }
+
+    /**
+     * Load Blade view with data and return Dompdf instance.
+     * Set $useBanglaFont = true when view has Bangla text.
+     */
+    public function loadView(string $viewName, array $data = [], bool $useBanglaFont = null): Dompdf
     {
         $html = $this->view->make($viewName, $data)->render();
-        return $this->loadHtml($html);
+        return $this->loadHtml($html, $useBanglaFont);
     }
 
     /**
      * Generate PDF from HTML and return raw output string.
+     * Pass true as second argument for Bangla font support.
      */
-    public function fromHtml(string $html): string
+    public function fromHtml(string $html, bool $useBanglaFont = null): string
     {
-        return $this->loadHtml($html)->output();
+        return $this->loadHtml($html, $useBanglaFont)->output();
     }
 
     /**
      * Generate PDF from Blade view and return raw output string.
+     * Pass true as third argument for Bangla font support.
      */
-    public function fromView(string $viewName, array $data = []): string
+    public function fromView(string $viewName, array $data = [], bool $useBanglaFont = null): string
     {
-        return $this->loadView($viewName, $data)->output();
+        return $this->loadView($viewName, $data, $useBanglaFont)->output();
     }
 
     /**
      * Generate from view and stream in browser (inline).
+     * Pass true as fourth argument for Bangla font.
      */
-    public function stream(string $viewName, array $data = [], string $filename = 'document.pdf'): \Illuminate\Http\Response
+    public function stream(string $viewName, array $data = [], string $filename = 'document.pdf', bool $useBanglaFont = null): \Illuminate\Http\Response
     {
-        $dompdf = $this->loadView($viewName, $data);
+        $dompdf = $this->loadView($viewName, $data, $useBanglaFont);
         return response($dompdf->output(), 200, [
             'Content-Type' => 'application/pdf',
             'Content-Disposition' => 'inline; filename="' . $filename . '"',
@@ -75,10 +123,11 @@ class PdfGenerator
 
     /**
      * Generate from view and trigger download.
+     * Pass true as fourth argument for Bangla font.
      */
-    public function download(string $viewName, array $data = [], string $filename = 'document.pdf'): \Illuminate\Http\Response
+    public function download(string $viewName, array $data = [], string $filename = 'document.pdf', bool $useBanglaFont = null): \Illuminate\Http\Response
     {
-        $dompdf = $this->loadView($viewName, $data);
+        $dompdf = $this->loadView($viewName, $data, $useBanglaFont);
         return response($dompdf->output(), 200, [
             'Content-Type' => 'application/pdf',
             'Content-Disposition' => 'attachment; filename="' . $filename . '"',
@@ -87,20 +136,22 @@ class PdfGenerator
 
     /**
      * Generate from view and save to path. Returns path.
+     * Pass true as fourth argument for Bangla font.
      */
-    public function save(string $viewName, string $path, array $data = []): string
+    public function save(string $viewName, string $path, array $data = [], bool $useBanglaFont = null): string
     {
-        $output = $this->fromView($viewName, $data);
+        $output = $this->fromView($viewName, $data, $useBanglaFont);
         file_put_contents($path, $output);
         return $path;
     }
 
     /**
      * Generate from HTML and save to path.
+     * Pass true as third argument for Bangla font.
      */
-    public function saveHtml(string $html, string $path): string
+    public function saveHtml(string $html, string $path, bool $useBanglaFont = null): string
     {
-        $output = $this->fromHtml($html);
+        $output = $this->fromHtml($html, $useBanglaFont);
         file_put_contents($path, $output);
         return $path;
     }
