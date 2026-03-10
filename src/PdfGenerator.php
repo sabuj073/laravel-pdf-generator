@@ -4,8 +4,7 @@ namespace Sabuj073\PdfGenerator;
 
 use Dompdf\Dompdf;
 use Dompdf\Options;
-use Illuminate\Contracts\View\View;
-use Illuminate\Support\Facades\View as ViewFacade;
+use Mpdf\Mpdf;
 
 class PdfGenerator
 {
@@ -19,35 +18,71 @@ class PdfGenerator
     }
 
     /**
-     * Load HTML string and return Dompdf instance (call ->stream(), ->output() or get raw).
+     * Load HTML and return an object with ->output() (Dompdf or mPDF wrapper).
+     * When useBanglaFont is true, uses mPDF for proper Bengali rendering (Dompdf does not support it).
      */
-    public function loadHtml(string $html, bool $useBanglaFont = null): Dompdf
+    public function loadHtml(string $html, bool $useBanglaFont = null)
     {
-        $options = new Options();
-        $options->set('isRemoteEnabled', true);
-
         $bangla = $this->config['bangla_font'] ?? [];
         $useBangla = $useBanglaFont ?? ($bangla['enabled'] ?? false);
         $fontPath = $bangla['path'] ?? $this->resolveBanglaFontPath();
-        $fontFamily = $bangla['family'] ?? 'Noto Sans Bengali';
 
         if ($useBangla && $fontPath && is_file($fontPath)) {
-            $fontDirReal = realpath(dirname($fontPath));
-            if ($fontDirReal !== false) {
-                $options->setFontDir($fontDirReal);
-                $options->setFontCache($fontDirReal);
-                $chroot = $options->getChroot();
-                $chroot[] = $fontDirReal;
-                $options->setChroot($chroot);
-            }
-            $options->set('defaultFont', $fontFamily);
-            $html = $this->injectBanglaFontCss($html, $fontPath, $fontFamily);
-        } else {
-            $options->set('defaultFont', $this->config['default_font'] ?? 'DejaVu Sans');
+            return $this->renderWithMpdf($html, $fontPath);
         }
 
+        return $this->renderWithDompdf($html);
+    }
+
+    /**
+     * Bengali PDF via mPDF (supports complex script / Bangla). Dompdf does not.
+     */
+    protected function renderWithMpdf(string $html, string $fontPath): object
+    {
+        $fontDir = realpath(dirname($fontPath));
+        $fontFile = basename($fontPath);
+        $fontKey = 'notosansbengali';
+
+        $defaultFontDirs = (new \Mpdf\Config\ConfigVariables())->getDefaults()['fontDir'] ?? [];
+        $defaultFontData = (new \Mpdf\Config\FontVariables())->getDefaults()['fontdata'] ?? [];
+
+        $mpdf = new Mpdf([
+            'mode' => 'utf-8',
+            'format' => $this->config['paper'] ?? 'A4',
+            'orientation' => $this->config['orientation'] ?? 'portrait',
+            'default_font_size' => 11,
+            'default_font' => $fontKey,
+            'fontDir' => array_merge($defaultFontDirs, [$fontDir]),
+            'fontdata' => $defaultFontData + [
+                $fontKey => [
+                    'R' => $fontFile,
+                    'I' => $fontFile,
+                    'B' => $fontFile,
+                    'BI' => $fontFile,
+                ],
+            ],
+        ]);
+
+        $html = $this->ensureUtf8Head($html);
+        $html = $this->injectMpdfBanglaStyle($html);
+        $mpdf->WriteHTML($html);
+        $output = $mpdf->Output('', 'S');
+
+        return new class($output) {
+            private string $out;
+            public function __construct(string $out) { $this->out = $out; }
+            public function output(): string { return $this->out; }
+        };
+    }
+
+    protected function renderWithDompdf(string $html): Dompdf
+    {
+        $options = new Options();
+        $options->set('isRemoteEnabled', true);
+        $options->set('defaultFont', $this->config['default_font'] ?? 'DejaVu Sans');
+
         $dompdf = new Dompdf($options);
-        $dompdf->loadHtml($html, 'UTF-8');
+        $dompdf->loadHtml($this->ensureUtf8Head($html), 'UTF-8');
         $dompdf->setPaper(
             $this->config['paper'] ?? 'A4',
             $this->config['orientation'] ?? 'portrait'
@@ -56,29 +91,30 @@ class PdfGenerator
         return $dompdf;
     }
 
-    /**
-     * Inject @font-face for Bangla so Bengali text renders in PDF.
-     * Dompdf requires chroot + fontDir and a file:// base URL to load the font.
-     */
-    protected function injectBanglaFontCss(string $html, string $fontPath, string $fontFamily): string
+    protected function injectMpdfBanglaStyle(string $html): string
     {
-        $fontDirReal = realpath(dirname($fontPath));
-        $fontFile = basename($fontPath);
-        $baseHref = 'file:///' . str_replace(['\\', ' '], ['/', '%20'], $fontDirReal) . '/';
-        $css = sprintf(
-            '<style>@font-face{font-family:"%s";src:url("%s") format("truetype");font-weight:400;font-style:normal;}body,body *{font-family:"%s",DejaVu Sans,sans-serif !important;}</style>',
-            $fontFamily,
-            $fontFile,
-            $fontFamily
-        );
-        $inject = '<meta charset="UTF-8"><base href="' . htmlspecialchars($baseHref) . '">' . $css;
+        $style = '<style>body,body *{font-family:notosansbengali,sans-serif;}</style>';
         if (stripos($html, '<head>') !== false) {
-            return preg_replace('/<head\s*>/i', '<head>' . $inject, $html, 1);
+            return preg_replace('/<head\s*>/i', '<head>' . $style, $html, 1);
+        }
+        if (stripos($html, '</head>') !== false) {
+            return preg_replace('/<\/head\s*>/i', $style . '</head>', $html, 1);
+        }
+        return $style . $html;
+    }
+
+    protected function ensureUtf8Head(string $html): string
+    {
+        if (stripos($html, 'charset') !== false && stripos($html, 'utf-8') !== false) {
+            return $html;
+        }
+        if (stripos($html, '<head>') !== false) {
+            return preg_replace('/<head\s*>/i', '<head><meta charset="UTF-8">', $html, 1);
         }
         if (stripos($html, '<html') !== false) {
-            return preg_replace('/(<html[^>]*>)/i', '$1<head>' . $inject . '</head>', $html, 1);
+            return preg_replace('/(<html[^>]*>)/i', '$1<head><meta charset="UTF-8"></head>', $html, 1);
         }
-        return '<!DOCTYPE html><html><head>' . $inject . '</head><body>' . $html . '</body></html>';
+        return '<!DOCTYPE html><html><head><meta charset="UTF-8"></head><body>' . $html . '</body></html>';
     }
 
     protected function resolveBanglaFontPath(): ?string
