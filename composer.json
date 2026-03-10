@@ -1,0 +1,31 @@
+{
+    "name": "sabuj073/laravel-pdf-generator",
+    "description": "PDF generator for Laravel from HTML or Blade views",
+    "keywords": ["laravel", "pdf", "generator", "dompdf"],
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "Md Mehedi Hasan Sabuj",
+            "email": "mhsabuj1@gmail.com"
+        }
+    ],
+    "require": {
+        "php": "^8.1",
+        "illuminate/support": "^10.0|^11.0",
+        "illuminate/view": "^10.0|^11.0",
+        "dompdf/dompdf": "^2.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "Sabuj073\\PdfGenerator\\": "src/"
+        }
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "Sabuj073\\PdfGenerator\\PdfGeneratorServiceProvider"
+            ]
+        }
+    },
+    "minimum-stability": "stable"
+}
