@@ -59,6 +59,7 @@ class PdfGenerator
                     'I' => $fontFile,
                     'B' => $fontFile,
                     'BI' => $fontFile,
+                    'useOTL' => 0xFF,  // OpenType Layout – বাংলা মাত্রা/জুক্তাক্ষ ঠিকভাবে দেখাতে
                 ],
             ],
         ]);
