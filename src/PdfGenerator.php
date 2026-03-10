@@ -32,6 +32,14 @@ class PdfGenerator
         $fontFamily = $bangla['family'] ?? 'Noto Sans Bengali';
 
         if ($useBangla && $fontPath && is_file($fontPath)) {
+            $fontDirReal = realpath(dirname($fontPath));
+            if ($fontDirReal !== false) {
+                $options->setFontDir($fontDirReal);
+                $options->setFontCache($fontDirReal);
+                $chroot = $options->getChroot();
+                $chroot[] = $fontDirReal;
+                $options->setChroot($chroot);
+            }
             $options->set('defaultFont', $fontFamily);
             $html = $this->injectBanglaFontCss($html, $fontPath, $fontFamily);
         } else {
@@ -50,25 +58,27 @@ class PdfGenerator
 
     /**
      * Inject @font-face for Bangla so Bengali text renders in PDF.
-     * Use base64 data URI so Dompdf loads the font without path resolution issues.
+     * Dompdf requires chroot + fontDir and a file:// base URL to load the font.
      */
     protected function injectBanglaFontCss(string $html, string $fontPath, string $fontFamily): string
     {
-        $fontData = base64_encode(file_get_contents($fontPath));
-        $dataUri = 'data:font/ttf;base64,' . $fontData;
+        $fontDirReal = realpath(dirname($fontPath));
+        $fontFile = basename($fontPath);
+        $baseHref = 'file:///' . str_replace(['\\', ' '], ['/', '%20'], $fontDirReal) . '/';
         $css = sprintf(
-            '<style>@font-face{font-family:"%s";src:url("%s") format("truetype");}body,body *{font-family:"%s",DejaVu Sans,sans-serif !important;}</style>',
+            '<style>@font-face{font-family:"%s";src:url("%s") format("truetype");font-weight:400;font-style:normal;}body,body *{font-family:"%s",DejaVu Sans,sans-serif !important;}</style>',
             $fontFamily,
-            $dataUri,
+            $fontFile,
             $fontFamily
         );
+        $inject = '<meta charset="UTF-8"><base href="' . htmlspecialchars($baseHref) . '">' . $css;
         if (stripos($html, '<head>') !== false) {
-            return preg_replace('/<head\s*>/i', '<head><meta charset="UTF-8">' . $css, $html, 1);
+            return preg_replace('/<head\s*>/i', '<head>' . $inject, $html, 1);
         }
         if (stripos($html, '<html') !== false) {
-            return preg_replace('/(<html[^>]*>)/i', '$1<head><meta charset="UTF-8">' . $css . '</head>', $html, 1);
+            return preg_replace('/(<html[^>]*>)/i', '$1<head>' . $inject . '</head>', $html, 1);
         }
-        return '<!DOCTYPE html><html><head><meta charset="UTF-8">' . $css . '</head><body>' . $html . '</body></html>';
+        return '<!DOCTYPE html><html><head>' . $inject . '</head><body>' . $html . '</body></html>';
     }
 
     protected function resolveBanglaFontPath(): ?string
