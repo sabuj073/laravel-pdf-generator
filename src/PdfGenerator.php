@@ -59,7 +59,8 @@ class PdfGenerator
                     'I' => $fontFile,
                     'B' => $fontFile,
                     'BI' => $fontFile,
-                    'useOTL' => 0xFF,  // OpenType Layout – বাংলা মাত্রা/জুক্তাক্ষ ঠিকভাবে দেখাতে
+                    // useOTL 0xFF অনেক ফন্টে mPDF TTFontFile "undefined array key" দেয়; তাই বন্ধ রাখা
+                    'useOTL' => 0x00,
                 ],
             ],
         ]);
