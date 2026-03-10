@@ -128,10 +128,10 @@ class PdfGenerator
     }
 
     /**
-     * Load Blade view with data and return Dompdf instance.
+     * Load Blade view with data. Returns object with ->output() (Dompdf or mPDF wrapper).
      * Set $useBanglaFont = true when view has Bangla text.
      */
-    public function loadView(string $viewName, array $data = [], bool $useBanglaFont = null): Dompdf
+    public function loadView(string $viewName, array $data = [], bool $useBanglaFont = null): object
     {
         $html = $this->view->make($viewName, $data)->render();
         return $this->loadHtml($html, $useBanglaFont);
